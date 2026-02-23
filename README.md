@@ -16,3 +16,14 @@ Estimate the causal effect of an intervention using an RCT benchmark and compare
 
 ## Methods used
 RCT, Matching, balance checks, ATE estimation
+
+## Key Takeaways
+- RCT benchmark provides a clean causal estimate.
+- Matching reduces imbalance compared to naive observational comparisons.
+
+## Assumptions & Diagnostics
+- RCT: balance checks confirm randomization.
+- Matching: overlap + covariate balance checked post-match.
+
+## Reproducibility
+Run `quarto render` to reproduce the report end-to-end.
