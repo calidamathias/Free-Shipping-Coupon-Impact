@@ -1,4 +1,4 @@
-# Causal Inference Project 1: RCT + Matching
+# Free-Shipping Coupon Impact (RCT Benchmark + Matching)
 
 ## Goal
 Estimate the causal effect of an intervention using an RCT benchmark and compare it to an observational approach using matching.
