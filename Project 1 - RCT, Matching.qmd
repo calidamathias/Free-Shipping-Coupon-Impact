@@ -1,0 +1,863 @@
+---
+title: "Project1-Team 43"
+author: "Jiayi Lang, Evanna Shen, Calida Mathias, Crystal Zhang, Jade Tsai"
+format: html
+editor: visual
+---
+
+## Project 1-Team 43
+
+-   Does giving users a free-shipping coupon increase purchase probability and spending within 14 days?
+
+### Part 1 - Introduction
+
+Free-shipping coupons are one of the most widely used promotional tools in e-commerce. Firms routinely deploy them to encourage hesitant users to complete purchases, increase basket size, and boost short-term revenue. Because these promotions are easy to implement and highly visible to customers, they are often assumed to be effective, with their success frequently justified by simple comparisons between users who received a coupon and those who did not.
+
+However, such comparisons can be misleading. In practice, coupons are often targeted toward users who are already more engaged or higher value, meaning that observed differences in post-coupon spending may reflect underlying user characteristics rather than the causal effect of the promotion itself. As a result, it becomes difficult to determine whether free-shipping coupons generate true incremental value or merely amplify behavior that would have occurred anyway. Distinguishing between these two explanations is critical for accurately evaluating promotional effectiveness and allocating marketing resources.
+
+To address this challenge, we examine customer behavior over a 14-day horizon, focusing on both total spending and purchase incidence. Rather than relying solely on observational patterns, the project is designed to separate genuine causal effects from differences driven by baseline user behavior. By explicitly accounting for user heterogeneity and realistic promotional targeting, we seek to understand not only whether free-shipping coupons appear effective, but whether they are causally effective.
+
+### Part 2 - Summary
+
+In this project, we analyze the causal impact of a free-shipping coupon on customer spending and purchase probability within 14 days using a simulated e-commerce dataset. The simulation is designed to reflect realistic consumer behavior, where users differ in prior spending and engagement, and where promotional offers are often targeted rather than randomly assigned.
+
+We construct two treatment settings. The first is a randomized controlled trial (RCT) with block randomization based on prior spending, which serves as a clean causal benchmark. The second is a targeted observational setting in which coupons are more likely to be assigned to higher-spending and more engaged users, creating selection bias similar to that seen in real-world marketing campaigns.
+
+Using the RCT, we estimate the average treatment effect under random assignment. We then show that naive observational comparisons substantially overstate the coupon's impact due to systematic baseline differences between treated and untreated users. To address this bias, we apply exact matching and inverse probability of treatment weighting (IPTW), assess covariate balance and overlap, and compare adjusted estimates to the randomized benchmark.
+
+Across methods, we find that observational estimates remain larger than the randomized benchmark even after adjustment, highlighting the difficulty of recovering causal effects when treatment assignment is targeted. The results emphasize that simple treated-versus-control comparisons can be misleading, and that credible evaluation of promotional effectiveness requires either randomized experimentation or carefully validated causal adjustment methods.
+
+Overall, the project demonstrates how evaluation design shapes conclusions about marketing interventions and underscores the importance of causal thinking when interpreting performance metrics for targeted promotions.
+
+### Part 3 - Data Simulation
+
+```{r}
+set.seed(123)
+N <- 10000
+
+# Confounders
+prior_spend <- rlnorm(N, meanlog = 3, sdlog = 0.5)
+sessions_pre <- rpois(N, lambda = 8)
+
+# RCT assignment 
+blocks <- cut(prior_spend, breaks = quantile(prior_spend, probs = seq(0,1,0.2)), include.lowest = TRUE)
+coupon_rct <- ave(prior_spend, blocks, FUN = function(x) rbinom(length(x),1,0.5))
+
+# Observational assignment (selection bias)
+p_obs <- plogis(-2 + 0.015*prior_spend + 0.2*sessions_pre)
+coupon_obs <- rbinom(N,1,p_obs)
+
+# Outcome
+epsilon <- rnorm(N, 0, 25)
+spend_14d <- 20 + 0.6*prior_spend + 2*sessions_pre + 15*coupon_obs + epsilon
+
+df <- data.frame(spend_14d, coupon_rct, coupon_obs, prior_spend, sessions_pre)
+write.csv(df, "project1_data.csv", row.names = FALSE)
+```
+
+Our target variable is the user's total spending within 14 days after the coupon decision window. We generate the outcome using the linear conditional expectation framework:
+
+spend_14d \<- 20 + 0.6\*prior_spend + 2\*sessions_pre + 15\*coupon_obs + epsilon
+
+This error term is assumed to follow a normal distribution with mean 0 and standard deviation 25, reflecting random demand shocks. The parameter values are chosen to reflect realistic purchasing behavior. The intercept (alpha) is set to 20, representing baseline spending. The treatment coefficient (beta) is 15, which represents the true causal effect of receiving a coupon on spending. The coefficient on prior spending (gamma1) is 0.6, capturing persistence in purchasing behavior, and the coefficient on sessions (gamma2) is 2, reflecting that more engaged users tend to spend more.
+
+This specification reflects standard consumer demand dynamics. Prior spending captures persistent purchasing behavior, as users who spent more in the past tend to continue spending at higher levels. `sessions_pre` measures engagement, since users who browse more frequently are more likely to make purchases. The coupon variable shifts demand upward by reducing the effective transaction cost through free shipping, thereby increasing the likelihood of spending. The Gaussian noise term, with mean zero and standard deviation 25, captures unobserved factors that influence spending, such as individual preferences, timing differences, and random purchase shocks.
+
+We simulate two treatment variables to support both required methods.
+
+**RCT treatment (`coupon_rct`)**
+
+For the experimental setting, treatment is assigned using block randomization based on prior spending. Block randomization improves covariate balance across treatment groups and mirrors experimental designs discussed in class. Users are divided into bins of prior_spend, and within each block: `coupon_rct`∼Bernoulli(0.5).
+
+**Observational treatment (`coupon_obs`)**
+
+In real e-commerce platforms, promotions are targeted. We therefore generate a non-random treatment. Firms are more likely to send coupons to active and high-spending users. This creates selection bias because treatment depends on characteristics that also affect spending.
+
+P(`coupon_obs`=1)=logit\^(-1)(−2+0.015⋅`prior_spend`+0.2⋅`sessions_pre`)
+
+The pre-treatment covariates represent heterogeneity across users. We model prior spending using a log-normal distribution with parameters μ = 3 and σ = 0.5. Spending data in e-commerce settings is typically right-skewed, with many users spending small amounts and a few spending much more. The log-normal distribution captures this realistic purchasing pattern and ensures that baseline spending is always positive.
+
+User engagement, measured by the number of sessions before treatment, is modeled using a Poisson distribution with parameter λ = 8. Engagement is naturally count data, and the Poisson distribution provides a simple and appropriate way to model the number of browsing sessions. This reflects that users differ in how frequently they visit the platform, which in turn influences their likelihood of making purchases.
+
+**ChatGPT Prompt**:
+
+-   "Simulate an e-commerce dataset to answer: 'Does giving users a free shipping coupon increase how much they spend within 14 days?' The dataset must support an RCT with block treatment assignment and observational matching methods including exact matching, propensity score matching, and IPTW. Include realistic pre-treatment covariates, a skewed nonnegative spend outcome, a targeted treatment assignment to create selection bias, and export to CSV in R."
+
+-   "We refined the initial simulation by simplifying the model to match the course's linear conditional expectation framework and by limiting the number of confounders to two core behavioral variables."
+
+### Part 4 - EDA
+
+After we've got the simulated data, we performed an EDA.
+
+First, loading the necessary libraries.
+
+```{r}
+library(tidyverse)
+library(corrplot)
+library(patchwork)
+```
+
+Then we did some basic inspection of the data.
+
+```{r}
+#df <- read.csv(file.choose())
+head(df)
+str(df)
+summary(df)
+colSums(is.na(df))
+```
+
+We looked into target variable distribution.
+
+```{r}
+p0 <-ggplot(df, aes(x=spend_14d))+
+  geom_histogram(aes(y=..density..),bins=30,fill='skyblue',color='black') + geom_density(alpha=.29,fill='pink')+
+  labs(title='Distribution of Y(spend_14d)',x='Spend (14 days)',y='Density') + theme_minimal()
+p0
+```
+
+We then compared experimental (RCT) and observational:
+
+```{r}
+df %>%
+  group_by(coupon_rct) %>%
+  summarise(mean_spend=mean(spend_14d))
+
+df %>%
+  group_by(coupon_obs) %>%
+  summarise(mean_spend=mean(spend_14d))
+
+p1 <-ggplot(df, aes(x=as.factor(coupon_rct),y=spend_14d))+
+  geom_boxplot(fill='lightblue')+
+  labs(title='Spend 14d by RCT Coupon',x="RCT Coupon(0=No, 1=Yes)",y='Spend')+theme_minimal()
+
+p2 <-ggplot(df, aes(x=as.factor(coupon_obs),y=spend_14d))+
+  geom_boxplot(fill='lightgreen')+
+  labs(title='Spend 14d by Observational Coupon',x="Obs Coupon(0=No, 1=Yes)",y='Spend')+theme_minimal()
+
+p1+p2
+```
+
+We checked for Selection Bias:
+
+```{r}
+df %>%
+  group_by(coupon_obs) %>%
+  summarise(
+    mean_prior_spend=mean(prior_spend),
+    mean_sessions=mean(sessions_pre)
+  )
+
+p3 <- ggplot(df,aes(x=prior_spend, fill=as.factor(coupon_obs)))+
+  geom_density(alpha=.5)+
+  labs(title='Prior Spend Distribution by Observational Coupon',x='Prior Spend',fill='Obs Coupon')+ theme_minimal()
+
+p4 <- ggplot(df,aes(x=sessions_pre, fill=as.factor(coupon_obs)))+
+  geom_density(alpha=.5)+
+  labs(title='Sessions Pre Distribution by Observational Coupon',x='Prior Spend',fill='Obs Coupon')+ theme_minimal()
+
+p3+p4&theme(plot.title = element_text(size = 10))
+```
+
+We also printed out the correlation matrix:
+
+```{r}
+cm <- cor(df)
+p5 <- corrplot(cm, method='color',addCoef.col = 'black',
+         tl.col='black',title='Correlation Matrix',mar=c(0,0,1,0))
+p5
+```
+
+And we dug into covariates:
+
+```{r}
+p6 <- ggplot(df, aes(x=prior_spend, y=spend_14d))+
+  geom_point(alpha=.3)+
+  geom_smooth(method='lm',color='gold')+
+  labs(title='Relationship: Prior Spend VS Spend 14d')+
+  theme_minimal()
+
+p7 <- ggplot(df, aes(x=sessions_pre, y=spend_14d))+
+  geom_point(alpha=.3)+
+  geom_smooth(method='lm',color='gold')+
+  labs(title='Relationship: Sessions Pre VS Spend 14d')+
+  theme_minimal()
+p6+p7&theme(plot.title = element_text(size = 10))
+```
+
+We could conclude that there's no significant difference in spending between those who received a coupon or not in the RCT. However, in the observational data, those who received a coupon appeared to be spending a lot more (nearly \$20).
+
+In the observational data, we also spotted that customers receiving the coupon had more sessions before the treatment, indicating possible selection bias.
+
+#### **EDA Influence:**
+
+We use the RCT as a benchmark because it ensures balanced covariates. In the observational coupon_obs data, coupons are targeted to more active, higher-value users, leading to severe imbalance and biased naive comparisons, which precludes the use of DiD. We therefore rely on Exact Matching and IPTW to balance observed baseline behaviors (prior_spend, sessions_pre) before estimating treatment effects.
+
+#### Possible Answer to client's question:
+
+According to EDA, we would give a negative answer to the client's question. The RCT results indicate that there's no causality between coupon and spending. In the observational results, there is a positive correlation between those two, but that was only because the company is targeting customers who show signs of a strong propensity for spending.
+
+### Part 5 - Methodology
+
+#### Goal, outcomes, and treatments
+
+**Client question:** Does giving users a **free-shipping coupon** increase (a) purchase probability and (b) spend within **14 days**?
+
+-   **Spend outcome:** `spend_14d`
+-   **Purchase outcome:** we convert spend to a purchase indicator
+
+*(Reason: in our simulated data, the outcome is continuous; this gives a simple proxy for conversion.)*
+
+**Treatments / settings**
+
+-   **RCT setting:** `coupon_rct` (random assignment using blocks)
+-   **Observational setting:** `coupon_obs` (targeted assignment; not random)
+
+We use the RCT as a clean causal benchmark, then apply observational causal methods (matching/weighting) and compare results.
+
+#### Brief description
+
+1)  **RCT (Randomized Controlled Trial)**\
+    We randomly assign coupons (within blocks of similar users). Because assignment is random, treated and control users are comparable on average. So the difference in average 14-day outcomes is a credible causal effect.
+
+2)  **Observational methods (when coupons are targeted)**\
+    In realistic settings, coupons are often sent to users who are more active or more price-sensitive. This creates **selection bias** (treated users may have higher spend even without the coupon). To correct for this, we use:
+
+-   **Exact Matching:** compare treated vs control users who share the same (coarsened) prior behavior.
+-   **Propensity score weighting (IPTW):** estimate each user's probability of treatment (propensity score) and weight observations by the inverse probability of their received treatment to create a balanced pseudo-population.
+
+We also run additional checks (balance, overlap, trimming, placebo test, heterogeneity) to strengthen credibility.
+
+#### Assumptions
+
+**Why these methods:** In the observational setting (`coupon_obs`), coupons are targeted to more active / higher-value users, so a naive treated--control comparison is biased. We therefore use Exact Matching and IPTW to make treated and control users comparable on observed baseline behavior (`prior_spend`, `sessions_pre`) before estimating the treatment effect.
+
+**Key assumptions**
+
+-   **RCT (`coupon_rct`)**
+
+    -   **Random assignment:** coupon is randomly assigned, so treated and control users are comparable on average.
+
+    -   **SUTVA:** one user's coupon does not affect another user's outcomes; the treatment is consistently defined.
+
+    -   **Post-treatment outcomes:** outcomes are measured after treatment assignment.
+
+-   **Observational (`coupon_obs`)**
+
+    -   **No unobserved confounding (conditional ignorability):** after conditioning on `prior_spend` and `sessions_pre`, coupon assignment is as-good-as random.
+
+    -   **Overlap (positivity):** treated and control users have overlapping propensity scores (we check this with PS overlap plots).
+
+    -   **Balance:** after matching/weighting, treated and control users are balanced on observed covariates (we verify using standardized mean differences / love plots).
+
+#### Detailed technical discussion
+
+**Data Preparation**
+
+We first loaded the simulated dataset and performed basic checks to understand its structure and quality. This included viewing the first few rows, checking variable types, reviewing summary statistics, and confirming there were no missing values.
+
+```{r}
+# Libraries (you already used tidyverse above, but keep it here for methodology)
+library(tidyverse)
+library(MatchIt)
+library(cobalt)
+
+# Confirm df is a data frame and has the columns we need
+class(df)
+names(df)
+
+# Quick check: do we have the key variables?
+required_cols <- c("spend_14d","coupon_rct","coupon_obs","prior_spend","sessions_pre")
+setdiff(required_cols, names(df))
+
+# Quick peek
+head(df)
+```
+
+We load the simulated dataset and confirm that the expected variables are present before running any causal methods. We then construct a binary purchase outcome from 14-day spend to measure purchase probability. Specifically, we define a user as having purchased within 14 days if their 14-day spend is greater than \$0.
+
+In addition, we create user "blocks" using pre-treatment behavior variables (`prior_spend` and `sessions_pre`). We bin each variable into quartiles and define a block as the interaction of the two bins. These blocks are used later for block-adjusted estimation in the RCT analysis (to improve precision).
+
+Finally, we run basic sanity checks by tabulating the number of purchasers vs non-purchasers and confirming the number of unique blocks created.
+
+```{r}
+library(tidyverse)
+
+# Always load the right data inside the chunk
+#df <- read.csv(file.choose())  # select project1_data.csv
+
+# Confirm column exists
+names(df)
+
+# Create purchase + blocks
+df <- df %>%
+  mutate(
+    purchase_14d = as.integer(spend_14d > 0),
+    block_spend  = ntile(prior_spend, 4),
+    block_sess   = ntile(sessions_pre, 4),
+    block_id     = interaction(block_spend, block_sess, drop = TRUE)
+  )
+
+# Sanity checks
+table(df$purchase_14d)
+length(unique(df$block_id))
+```
+
+**RCT ATE (Benchmark causal effect)**
+
+To estimate the causal impact of the free-shipping coupon under randomized assignment, we use the RCT treatment indicator `coupon_rct`. Because the coupon is randomly assigned in this setting, treated and control users are comparable on average, so the difference in outcomes can be interpreted as a causal effect.
+
+We estimate the **Average Treatment Effect (ATE)** in two ways:
+
+1.  **Difference in means** between treated and control groups for both outcomes (`spend_14d` and `purchase_14d`).
+
+2.  **Block-adjusted regression** that includes block fixed effects (`block_id`) to improve precision. This adjustment does not change identification (randomization already identifies the effect), but it can reduce variance by comparing users within similar pre-treatment blocks.
+
+We also report standard t-tests / regression outputs to quantify statistical uncertainty.
+
+```{r}
+# RCT: Difference-in-means ATE
+ate_spend_rct <- with(df, mean(spend_14d[coupon_rct == 1]) - mean(spend_14d[coupon_rct == 0]))
+ate_purchase_rct <- with(df, mean(purchase_14d[coupon_rct == 1]) - mean(purchase_14d[coupon_rct == 0]))
+
+ate_spend_rct
+ate_purchase_rct
+
+# RCT: t-tests (uncertainty)
+t.test(spend_14d ~ coupon_rct, data = df)
+t.test(purchase_14d ~ coupon_rct, data = df)
+
+```
+
+```{r}
+# RCT: Block-adjusted regression (precision improvement)
+m_rct_spend <- lm(spend_14d ~ coupon_rct + factor(block_id), data = df)
+m_rct_purchase <- lm(purchase_14d ~ coupon_rct + factor(block_id), data = df)
+
+summary(m_rct_spend)
+summary(m_rct_purchase)
+
+```
+
+As a diagnostic for the randomization, we check whether key pre-treatment covariates (`prior_spend`, `sessions_pre`) are balanced between RCT treated and control groups. Under random assignment, these differences should be small.
+
+```{r}
+t.test(prior_spend ~ coupon_rct, data = df)
+t.test(sessions_pre ~ coupon_rct, data = df)
+```
+
+**RCT (benchmark) results**
+
+Using the randomized coupon assignment (`coupon_rct`), the estimated ATE on **14-day spend** is **−0.255** (difference in means), and the Welch t-test indicates this is not statistically significant (**p = 0.6505**, 95% CI: \[−0.8466, 1.3557\]). The average spend is **57.05** for control vs **56.80** for treated, suggesting no meaningful impact of the coupon on spending in the RCT.
+
+For **purchase probability**, the estimated ATE is **+0.00227** (≈ **+0.23 percentage points**), also not statistically significant (**p = 0.4262**, 95% CI: \[−0.00786, 0.00332\]). Purchase rates are **0.9781** (control) vs **0.9804** (treated), indicating essentially no change in conversion under random assignment.
+
+We also estimate block-adjusted regressions (including `factor(block_id)`) to improve precision. The coefficient on `coupon_rct` remains near zero and statistically insignificant for both outcomes (**spend: −0.171, p = 0.747; purchase: +0.00265, p = 0.349**), consistent with the difference-in-means results.
+
+As a randomization diagnostic, we check balance on key pre-treatment covariates. There is no statistically significant difference between treatment and control for `prior_spend` (**p = 0.1529**) or `sessions_pre` (**p = 0.5363**), supporting that the RCT groups are comparable.
+
+**Observational baseline (naïve estimate + selection bias)**
+
+Now we move to the observational treatment (`coupon_obs`). This step is important because it shows why we *need* matching/weighting.
+
+In the observational setting (`coupon_obs`), coupons are targeted rather than randomized. As a result, a naïve treated--control comparison may be biased because treated users can differ systematically from untreated users (e.g., higher baseline spending or more sessions). We first compute the naïve difference in outcomes by `coupon_obs` and compare it to the RCT benchmark. We also summarize differences in pre-treatment covariates to directly quantify selection bias.
+
+```{r}
+# Observational naive comparisons (biased on purpose)
+df %>%
+  group_by(coupon_obs) %>%
+  summarise(
+    n = n(),
+    mean_spend_14d = mean(spend_14d),
+    mean_purchase_14d = mean(purchase_14d),
+    mean_prior_spend = mean(prior_spend),
+    mean_sessions_pre = mean(sessions_pre)
+  )
+
+# Naive ATEs (observational, unadjusted)
+ate_spend_naive_obs <- with(df, mean(spend_14d[coupon_obs == 1]) - mean(spend_14d[coupon_obs == 0]))
+ate_purchase_naive_obs <- with(df, mean(purchase_14d[coupon_obs == 1]) - mean(purchase_14d[coupon_obs == 0]))
+
+ate_spend_naive_obs
+ate_purchase_naive_obs
+
+# Quick tests (will reflect selection + noise)
+t.test(spend_14d ~ coupon_obs, data = df)
+t.test(purchase_14d ~ coupon_obs, data = df)
+t.test(prior_spend ~ coupon_obs, data = df)
+t.test(sessions_pre ~ coupon_obs, data = df)
+
+```
+
+In the observational setting, coupons are targeted rather than randomized, so a simple treated--control comparison may be biased. We directly test for selection bias using pre-treatment covariates. We find strong evidence that users who receive the observational coupon differ systematically from those who do not. Specifically, treated users have **higher prior spend** (23.68 vs 21.84; Welch t-test p = 4.26e−14) and **more pre-period sessions** (8.74 vs 7.30; Welch t-test p \< 2.2e−16). This indicates that coupon assignment is correlated with baseline engagement/value, so naïve estimates of the coupon effect under `coupon_obs` are not causally interpretable without adjustment.\
+
+Therefore, we apply matching and weighting methods to make treated and untreated users comparable on these pre-treatment variables before estimating causal effects.
+
+```{r}
+ate_spend_naive_obs <- with(df, mean(spend_14d[coupon_obs == 1]) - mean(spend_14d[coupon_obs == 0]))
+ate_purchase_naive_obs <- with(df, mean(purchase_14d[coupon_obs == 1]) - mean(purchase_14d[coupon_obs == 0]))
+
+ate_spend_naive_obs
+ate_purchase_naive_obs
+
+```
+
+A naïve comparison using the observational treatment indicator (`coupon_obs`) suggests that treated users spend **\$19.66 more** on average within 14 days and have a **3.12 percentage point** higher probability of purchasing (ATE_spend = 19.66; ATE_purchase = 0.0312). However, these estimates are **not causally interpretable** because coupon assignment in the observational setting is targeted. Consistent with selection bias, observationally treated users have significantly higher baseline engagement/value (higher `prior_spend` and more `sessions_pre`). Therefore, we apply matching and weighting methods to adjust for these pre-treatment differences before estimating the causal effect.
+
+**Exact Matching**
+
+```{r}
+library(MatchIt)
+library(cobalt)
+
+df <- df %>%
+  mutate(
+    prior_bin = ntile(prior_spend, 5),
+    sess_bin  = ntile(sessions_pre, 5)
+  )
+
+m_exact <- matchit(
+  coupon_obs ~ factor(prior_bin) + factor(sess_bin),
+  data = df,
+  method = "exact"
+)
+
+summary(m_exact)
+bal.tab(m_exact)
+
+df_exact <- match.data(m_exact)
+
+ate_spend_exact <- with(df_exact, mean(spend_14d[coupon_obs == 1]) - mean(spend_14d[coupon_obs == 0]))
+ate_purchase_exact <- with(df_exact, mean(purchase_14d[coupon_obs == 1]) - mean(purchase_14d[coupon_obs == 0]))
+
+ate_spend_exact
+ate_purchase_exact
+
+```
+
+```{r}
+# Matched dataset includes weights from matchit
+df_exact <- match.data(m_exact)
+
+# Weighted mean helper
+w_mean <- function(y, w) sum(y * w) / sum(w)
+
+# Weighted ATEs (THIS is the exact-matching estimate)
+ate_spend_exact_w <- with(df_exact,
+  w_mean(spend_14d[coupon_obs == 1], weights[coupon_obs == 1]) -
+    w_mean(spend_14d[coupon_obs == 0], weights[coupon_obs == 0])
+)
+
+ate_purchase_exact_w <- with(df_exact,
+  w_mean(purchase_14d[coupon_obs == 1], weights[coupon_obs == 1]) -
+    w_mean(purchase_14d[coupon_obs == 0], weights[coupon_obs == 0])
+)
+
+ate_spend_exact_w
+ate_purchase_exact_w
+
+```
+
+**Exact matching results**
+
+Using exact matching on quintile bins of `prior_spend` and `sessions_pre`, we estimate a weighted treatment effect of **+16.56** on 14-day spend and **+0.0225** on purchase probability (≈ **+2.25 percentage points**). Compared to the naïve observational differences (19.66 spend; 3.12pp purchase), the estimated effects decrease after controlling for baseline differences, indicating that part of the naïve effect was driven by selection bias. We compute these estimates using the matching weights returned by `MatchIt`, since exact matching induces weighting when strata contain different numbers of treated and control users.
+
+**propensity score matching**
+
+```{r}
+# ---- Propensity Score Matching (Nearest Neighbor) ----
+
+library(tidyverse)
+library(MatchIt)
+library(cobalt)
+
+df <- read.csv("project1_data.csv") %>%
+  mutate(
+    purchase_14d = as.integer(spend_14d > 0),
+    block_spend  = ntile(prior_spend, 4),
+    block_sess   = ntile(sessions_pre, 4),
+    block_id     = interaction(block_spend, block_sess, drop = TRUE),
+    log_prior_spend = log1p(prior_spend)
+  )
+
+m_psm <- matchit(
+  coupon_obs ~ log_prior_spend + sessions_pre,
+  data = df,
+  method = "nearest",
+  distance = "logit",
+  ratio = 1
+)
+
+md_psm <- match.data(m_psm)
+
+psm_spend <- with(md_psm,
+                  mean(spend_14d[coupon_obs == 1]) -
+                  mean(spend_14d[coupon_obs == 0]))
+
+psm_purch <- with(md_psm,
+                  mean(purchase_14d[coupon_obs == 1]) -
+                  mean(purchase_14d[coupon_obs == 0]))
+
+psm_spend
+psm_purch
+
+library(MatchIt)
+library(cobalt)
+library(ggplot2)
+
+bal.plot(
+  m_psm,
+  var.name = "distance",
+  which = "both",
+  type = "density",
+  mirror = TRUE,
+  sample.names = c("Before Matching", "After Matching"),
+  title = "Propensity Score Overlap Before and After Matching"
+)
+
+
+```
+
+We additionally implement propensity score matching using nearest-neighbor matching as a robustness check. The estimated effects are qualitatively similar to those obtained via exact matching and IPTW, reinforcing the conclusion that naïve observational estimates overstate the true causal effect.
+
+**Propensity score weighting (IPTW)**
+
+Next, we use propensity score **weighting** to adjust for selection into `coupon_obs`. We estimate each user's probability of receiving a coupon (propensity score) using a **logistic regression** on pre-treatment covariates (`prior_spend`, `sessions_pre`). We then compute **inverse probability of treatment weights (IPTW)** to create a reweighted pseudo-population where treated and untreated users are more comparable on these covariates.
+
+To improve stability, we **cap extreme weights** at the 99th percentile. Finally, we estimate the treatment effect as the difference in **weighted mean outcomes** between treated and control users for both outcomes: `spend_14d` and `purchase_14d`.
+
+**IPTW estimates (capped weights):**
+
+-   Spend ATE (14 days): **+16.05**
+
+-   Purchase probability ATE (14 days): **+0.0249** (≈ **+2.49 percentage points**)
+
+```{r}
+# ---- IPTW (Propensity score weighting) - stable, no MatchIt ----
+
+# Load data
+#df <- read.csv(file.choose())   # select project1_data.csv
+
+# Outcomes
+df$purchase_14d <- as.integer(df$spend_14d > 0)
+
+# 1) Propensity score model
+ps_model <- glm(coupon_obs ~ prior_spend + sessions_pre,
+                data = df, family = binomial())
+
+df$ps <- predict(ps_model, type = "response")
+
+# 2) IPTW weights (ATE)
+# w = 1/ps for treated, 1/(1-ps) for control
+df$w_iptw <- ifelse(df$coupon_obs == 1, 1/df$ps, 1/(1 - df$ps))
+
+# 3) Stabilize / cap extreme weights (helps prevent noisy estimates)
+cap <- quantile(df$w_iptw, 0.99)   # cap at 99th percentile
+df$w_cap <- pmin(df$w_iptw, cap)
+
+# helper: weighted mean
+wmean <- function(x, w) sum(x * w) / sum(w)
+
+# 4) Weighted ATEs
+ate_spend_iptw <- wmean(df$spend_14d[df$coupon_obs == 1], df$w_cap[df$coupon_obs == 1]) -
+                  wmean(df$spend_14d[df$coupon_obs == 0], df$w_cap[df$coupon_obs == 0])
+
+ate_purchase_iptw <- wmean(df$purchase_14d[df$coupon_obs == 1], df$w_cap[df$coupon_obs == 1]) -
+                     wmean(df$purchase_14d[df$coupon_obs == 0], df$w_cap[df$coupon_obs == 0])
+
+ate_spend_iptw
+ate_purchase_iptw
+
+
+
+
+```
+
+Overall, the IPTW results suggest that receiving a free-shipping coupon increases 14-day spending by about \$16 on average and increases the probability of making any purchase within 14 days by about 2.5 percentage points, under the assumption of no unobserved confounding given our covariates.
+
+**IPTW diagnostics**
+
+To evaluate whether IPTW is credible, we check (1) **overlap** in propensity scores between treated and control users, (2) **weight stability** (to ensure a few observations are not dominating), and (3) whether weighting improves **covariate balance** on `prior_spend` and `sessions_pre`.
+
+```{r}
+library(cobalt)
+library(ggplot2)
+
+# 1) Overlap: propensity score distributions
+ggplot(df, aes(x = ps, fill = factor(coupon_obs))) +
+  geom_density(alpha = 0.4) +
+  labs(title = "Propensity score overlap (coupon_obs)", fill = "coupon_obs") +
+  theme_minimal()
+
+# 2) Weight stability
+summary(df$w_iptw)
+summary(df$w_cap)
+
+# 3) Balance check (before vs after weighting)
+bal_iptw <- bal.tab(coupon_obs ~ prior_spend + sessions_pre,
+                    data = df,
+                    weights = df$w_cap,
+                    method = "weighting")
+
+bal_iptw
+love.plot(bal_iptw, stats = "mean.diffs", threshold = 0.1)
+
+```
+
+After applying IPTW (with capped weights), we expect treated and control groups to have improved balance on observed covariates. If standardized mean differences fall below common thresholds (e.g., 0.1), this suggests weighting successfully reduced observed selection bias.
+
+**Method comparison** To summarize our findings across approaches, we compare ATE estimates from the RCT benchmark to the observational estimates (naïve, exact matching, and IPTW).
+
+```{r}
+library(tibble)
+
+# Make sure df exists (reload if needed)
+# df <- read.csv(file.choose())  # uncomment if df is not in memory
+
+# Recreate purchase_14d if needed
+if(!("purchase_14d" %in% names(df))) {
+  df$purchase_14d <- as.integer(df$spend_14d > 0)
+}
+
+# Recompute ATEs (so this chunk is self-contained)
+ate_spend_rct <- with(df, mean(spend_14d[coupon_rct == 1]) - mean(spend_14d[coupon_rct == 0]))
+ate_purchase_rct <- with(df, mean(purchase_14d[coupon_rct == 1]) - mean(purchase_14d[coupon_rct == 0]))
+
+ate_spend_naive_obs <- with(df, mean(spend_14d[coupon_obs == 1]) - mean(spend_14d[coupon_obs == 0]))
+ate_purchase_naive_obs <- with(df, mean(purchase_14d[coupon_obs == 1]) - mean(purchase_14d[coupon_obs == 0]))
+
+ate_spend_exact_w <- 16.56351
+ate_purchase_exact_w <- 0.02245731
+ate_spend_iptw <- 16.04625
+ate_purchase_iptw <- 0.02488976
+ate_spend_psm <- 18.93173
+ate_purchase_psm <- 0.02783505
+
+results <- tibble(
+  method = c("RCT (benchmark)",
+             "Naive observational",
+             "Exact matching (weighted)",
+             "IPTW (capped weights)",
+            "PSM (capped weights)"),
+  ate_spend = c(ate_spend_rct,
+               ate_spend_naive_obs,
+               ate_spend_exact_w,
+               ate_spend_iptw,
+               ate_spend_psm),
+  ate_purchase = c(ate_purchase_rct,
+                  ate_purchase_naive_obs,
+                  ate_purchase_exact_w,
+                  ate_purchase_iptw,
+                  ate_purchase_psm)
+)
+
+results
+```
+
+The RCT benchmark suggests the causal effect of a free-shipping coupon is essentially **zero** (ATE spend ≈ −0.25; ATE purchase ≈ +0.0023). In contrast, the naïve observational estimate is much larger (**+\$19.66 spend**, **+3.12 pp purchase**), which is consistent with **selection bias** (targeting higher-value users). After adjustment, **Exact Matching** and **IPTW** reduce the naïve estimate slightly (**\~+\$16 spend**, **\~+2.25--2.49 pp**), but they still remain far from the RCT benchmark---suggesting **residual confounding** remains even after controlling for `prior_spend` and `sessions_pre`.
+
+In this simulated dataset, the targeted observational methods overstate the effect relative to the randomized benchmark; the most credible estimate is the **RCT result (near zero impact)**
+
+### Part 6 - Findings
+
+#### Key results (tables)
+
+```{r}
+library(tidyverse)
+library(MatchIt)
+library(cobalt)
+
+# Load the data (reproducible for Knit)
+df <- read.csv("project1_data.csv") %>%
+  mutate(
+    purchase_14d = as.integer(spend_14d > 0),
+    block_spend  = ntile(prior_spend, 4),
+    block_sess   = ntile(sessions_pre, 4),
+    block_id     = interaction(block_spend, block_sess, drop = TRUE),
+    log_prior_spend = log1p(prior_spend)
+  )
+
+# Helper: weighted mean
+wmean <- function(x, w) sum(x*w) / sum(w)
+
+# (A) RCT benchmark (ATE)
+ate_rct_spend <- with(df, mean(spend_14d[coupon_rct==1]) - mean(spend_14d[coupon_rct==0]))
+ate_rct_purch <- with(df, mean(purchase_14d[coupon_rct==1]) - mean(purchase_14d[coupon_rct==0]))
+
+# (B) Observational naive (biased)
+naive_spend <- with(df, mean(spend_14d[coupon_obs==1]) - mean(spend_14d[coupon_obs==0]))
+naive_purch <- with(df, mean(purchase_14d[coupon_obs==1]) - mean(purchase_14d[coupon_obs==0]))
+
+# (C) Exact matching on coarsened covariates (ATT)
+m_exact <- matchit(coupon_obs ~ block_spend + block_sess, data = df, method = "exact")
+md_exact <- match.data(m_exact)  # includes weights
+
+att_exact_spend <- with(md_exact,
+                        wmean(spend_14d[coupon_obs==1], weights[coupon_obs==1]) -
+                          wmean(spend_14d[coupon_obs==0], weights[coupon_obs==0]))
+att_exact_purch <- with(md_exact,
+                        wmean(purchase_14d[coupon_obs==1], weights[coupon_obs==1]) -
+                          wmean(purchase_14d[coupon_obs==0], weights[coupon_obs==0]))
+
+# (C2) Propensity Score Matching (Nearest Neighbor)
+m_psm <- matchit(
+  coupon_obs ~ log_prior_spend + sessions_pre,
+  data = df,
+  method = "nearest",
+  distance = "logit",
+  ratio = 1
+)
+
+md_psm <- match.data(m_psm)
+
+psm_spend <- with(md_psm,
+                  mean(spend_14d[coupon_obs == 1]) -
+                  mean(spend_14d[coupon_obs == 0]))
+
+psm_purch <- with(md_psm,
+                  mean(purchase_14d[coupon_obs == 1]) -
+                  mean(purchase_14d[coupon_obs == 0]))
+
+# (D) IPTW (stabilized) + trimming (ATE)
+ps_mod <- glm(coupon_obs ~ log_prior_spend + sessions_pre, data = df, family = binomial())
+df$ps <- pmin(pmax(predict(ps_mod, type = "response"), 1e-6), 1-1e-6)
+
+p_t <- mean(df$coupon_obs == 1)
+df$sw <- ifelse(df$coupon_obs == 1, p_t/df$ps, (1-p_t)/(1-df$ps))
+
+# trim extreme weights (stability)
+lo <- quantile(df$sw, 0.01)
+hi <- quantile(df$sw, 0.99)
+df_w <- df %>% filter(sw >= lo, sw <= hi)
+
+iptw_spend <- coef(lm(spend_14d ~ coupon_obs, data = df_w, weights = sw))["coupon_obs"]
+iptw_purch <- coef(lm(purchase_14d ~ coupon_obs, data = df_w, weights = sw))["coupon_obs"]
+
+# Summary table
+results_tbl <- tibble(
+  Method = c("RCT benchmark (ATE)", "Observational naive", "Exact matching (ATT)", "IPTW stabilized + trim (ATE)"),
+  Spend_Effect = c(ate_rct_spend, naive_spend, att_exact_spend, iptw_spend),
+  Purchase_Effect = c(ate_rct_purch, naive_purch, att_exact_purch, iptw_purch)
+) %>%
+  mutate(across(c(Spend_Effect, Purchase_Effect), ~round(.x, 4)))
+
+results_tbl
+```
+
+**Interpretation of Table (high-level):**
+
+1.  The **RCT benchmark** is close to **zero**, suggesting **no causal effect** under random assignment (in this simulated setting for `coupon_rct`).
+2.  The **observational naive** estimate is much larger because `coupon_obs` is **targeted** (selection bias).
+3.  After **Exact Matching** and **IPTW**, the estimate reflects the **causal lift among comparable users**, and it moves **away from the naive bias** and toward a stable causal estimate.
+
+#### 6.2 Figures (for methodology summary)
+
+##### (1) Selection bias: treated vs control look different before adjustment
+
+```{r}
+# Covariate imbalance in observational assignment
+df %>%
+  group_by(coupon_obs) %>%
+  summarise(
+    n = n(),
+    mean_prior_spend = mean(prior_spend),
+    mean_sessions_pre = mean(sessions_pre),
+    mean_spend_14d = mean(spend_14d),
+    mean_purchase_14d = mean(purchase_14d)
+  )
+```
+
+```{r}
+# Visualize covariate differences (observational targeting)
+df %>%
+  pivot_longer(cols = c(prior_spend, sessions_pre), names_to = "var", values_to = "value") %>%
+  ggplot(aes(x = factor(coupon_obs), y = value)) +
+  geom_boxplot() +
+  facet_wrap(~var, scales = "free_y") +
+  labs(x = "coupon_obs", y = "Value", title = "Selection bias check: covariates differ by observational treatment")
+```
+
+##### (2) Propensity score overlap + weight stability
+
+```{r}
+# PS overlap plot
+df %>%
+  ggplot(aes(x = ps, fill = factor(coupon_obs))) +
+  geom_histogram(bins = 40, position = "identity", alpha = 0.5) +
+  labs(title = "Propensity score overlap", fill = "coupon_obs")
+# Weight distribution (after trimming bounds)
+df %>%
+  ggplot(aes(x = sw)) +
+  geom_histogram(bins = 60) +
+  geom_vline(xintercept = c(lo, hi), linetype = 2) +
+  labs(title = "IPTW stabilized weights (trim lines shown)", x = "stabilized weight", y = "count")
+
+```
+
+\(3\) Balance improvement (Love plots)
+
+```{r}
+# Balance BEFORE weighting
+bal_unadj <- bal.tab(coupon_obs ~ log_prior_spend + sessions_pre, data = df, estimand = "ATE")
+love.plot(bal_unadj, abs = TRUE, threshold = 0.1, var.order = "unadjusted",
+          title = "Covariate balance BEFORE adjustment (observational)")
+
+# Balance AFTER IPTW
+bal_iptw <- bal.tab(coupon_obs ~ log_prior_spend + sessions_pre, data = df_w, weights = df_w$sw, estimand = "ATE")
+love.plot(bal_iptw, abs = TRUE, threshold = 0.1, var.order = "unadjusted",
+          title = "Covariate balance AFTER IPTW (stabilized + trimmed)")
+```
+
+#### 6.3 Non-technical summary
+
+**What we did:**
+
+We evaluated whether a free-shipping coupon increases customers' likelihood of making a purchase and their total spending within 14 days. We examined the question from two complementary perspectives:
+
+1.  **A randomized experiment (RCT)** that serves as a clean benchmark for the true causal effect.
+2.  **A realistic targeted coupon setting**, where coupons are more likely to be sent to higher-value or more active customers, which can bias simple comparisons.
+
+To address this bias in the targeted setting, we applied **three adjustment strategies**: exact matching, **propensity score matching**, and propensity score weighting.
+
+**What we found:**
+
+1.  In the **randomized setting**, the coupon generated **little to no measurable change** in either 14-day spending or purchase likelihood.
+2.  In the **targeted (observational) setting**, coupon recipients appeared stronger even before receiving the coupon, with higher baseline activity and spending. As a result, **naive treated-versus-untreated comparisons substantially overstate the coupon's impact**.
+3.  After correcting for targeting using **exact matching, propensity score matching, and weighting**, the estimated coupon effects become **more credible and consistent across methods**, reflecting comparisons between observationally similar customers.
+
+**Bottom line for the client:**\
+Evaluating coupon performance using simple averages can **confuse targeting effects with true causal impact**. Reliable measurement requires either a randomized test or appropriate statistical adjustments, such as **propensity score matching or weighting**, to ensure fair comparisons.
+
+#### 6.4 Technical discussion (for analytics team)
+
+**Why naive observational results are biased**
+
+The observational treatment indicator (`coupon_obs`) depends on prior spending and pre-campaign activity. Consequently, treated and untreated users differ systematically at baseline, violating the comparability assumption and leading to **selection bias** in naive estimates.
+
+**How we corrected it**
+
+1.  **Exact (coarsened) matching:** Treated and control users are matched within the same quartiles of prior spending and sessions, yielding an **ATT-style estimate** for a comparable subpopulation.**Propensity score matching (PSM):** We estimate treatment probabilities using a logistic regression and perform nearest-neighbor matching on the propensity score. This approach balances covariates **in expectation** and provides an additional **ATT estimate** that does not rely on exact binning.
+2.  **Propensity score matching (PSM):** We estimate treatment probabilities using a logistic regression and perform nearest-neighbor matching on the propensity score. This approach balances covariates **in expectation** and provides an additional **ATT estimate** that does not rely on exact binning.
+3.  **Propensity score weighting (IPTW):** Estimated treatment probabilities are used to construct a weighted pseudo-population targeting the **ATE**. Stabilized weights and trimming are applied to improve robustness and reduce the influence of extreme observations.
+
+**Diagnostics and validation**
+
+1.  **Propensity score overlap** assessments support the overlap (positivity) assumption required for matching and weighting.
+
+2.  **Love plots** demonstrate substantial reductions in standardized mean differences after propensity score weighting, indicating improved covariate balance.
+
+3.  The similarity of results across **exact matching, propensity score matching, and IPTW** provides robustness evidence that the findings are not driven by a single methodological choice.
+
+#### 6.5 Business / organizational impact
+
+**Measurement impact:** Without adjustment, coupon performance metrics are likely to be **inflated by targeting**, leading to overly optimistic conclusions about campaign effectiveness.
+
+**Decision impact:** To obtain credible estimates of promotional lift, the organization should either:
+
+-   Implement **small, blocked randomized holdout tests** when feasible, or
+
+-   Apply **propensity score--based methods**, such as matching or weighting, as a standardized evaluation framework when randomization is impractical.
+
+**Operational Impact:**
+
+Institutionalizing a repeatable evaluation pipeline---combining propensity score estimation, **matching and weighting diagnostics**, and causal effect reporting---will enable more accurate assessment of marketing interventions and support better allocation of coupon budgets toward segments where **causal lift is demonstrably positive**.
